@@ -4,7 +4,7 @@ import { io } from 'socket.io-client';
 import { useEffect, useState } from 'react';
 
 // Socket.io connection URL
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3001';
 
 // Create socket instance
 export const socket = io(SOCKET_URL, {
@@ -21,12 +21,13 @@ export const useSocket = () => {
   const [messages, setMessages] = useState([]);
   const [users, setUsers] = useState([]);
   const [typingUsers, setTypingUsers] = useState([]);
+  const [myId, setMyId] = useState(null);
 
   // Connect to socket server
-  const connect = (username) => {
+  const connect = (username, room) => {
     socket.connect();
-    if (username) {
-      socket.emit('user_join', username);
+    if (username && room) {
+      socket.emit('user_join', { username, room });
     }
   };
 
@@ -36,8 +37,8 @@ export const useSocket = () => {
   };
 
   // Send a message
-  const sendMessage = (message) => {
-    socket.emit('send_message', { message });
+  const sendMessage = (message, room, options = {}) => {
+    socket.emit('send_message', { message, room, ...options });
   };
 
   // Send a private message
@@ -50,11 +51,22 @@ export const useSocket = () => {
     socket.emit('typing', isTyping);
   };
 
+  // Mark message as read
+  const markMessageRead = (messageId) => {
+    socket.emit('message_read', { messageId });
+  };
+
+  // Send a reaction
+  const sendReaction = (messageId, reaction) => {
+    socket.emit('message_reaction', { messageId, reaction });
+  };
+
   // Socket event listeners
   useEffect(() => {
     // Connection events
     const onConnect = () => {
       setIsConnected(true);
+      setMyId(socket.id);
     };
 
     const onDisconnect = () => {
@@ -72,13 +84,37 @@ export const useSocket = () => {
       setMessages((prev) => [...prev, message]);
     };
 
+    // Read receipt update
+    const onMessageReadUpdate = ({ messageId, userId }) => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId
+            ? {
+                ...msg,
+                readBy: msg.readBy ? [...new Set([...msg.readBy, userId])] : [userId],
+              }
+            : msg
+        )
+      );
+    };
+
+    // Reaction update
+    const onMessageReactionUpdate = ({ messageId, reactions }) => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId
+            ? { ...msg, reactions }
+            : msg
+        )
+      );
+    };
+
     // User events
     const onUserList = (userList) => {
       setUsers(userList);
     };
 
     const onUserJoined = (user) => {
-      // You could add a system message here
       setMessages((prev) => [
         ...prev,
         {
@@ -91,7 +127,6 @@ export const useSocket = () => {
     };
 
     const onUserLeft = (user) => {
-      // You could add a system message here
       setMessages((prev) => [
         ...prev,
         {
@@ -117,6 +152,8 @@ export const useSocket = () => {
     socket.on('user_joined', onUserJoined);
     socket.on('user_left', onUserLeft);
     socket.on('typing_users', onTypingUsers);
+    socket.on('message_read_update', onMessageReadUpdate);
+    socket.on('message_reaction_update', onMessageReactionUpdate);
 
     // Clean up event listeners
     return () => {
@@ -128,6 +165,8 @@ export const useSocket = () => {
       socket.off('user_joined', onUserJoined);
       socket.off('user_left', onUserLeft);
       socket.off('typing_users', onTypingUsers);
+      socket.off('message_read_update', onMessageReadUpdate);
+      socket.off('message_reaction_update', onMessageReactionUpdate);
     };
   }, []);
 
@@ -143,6 +182,9 @@ export const useSocket = () => {
     sendMessage,
     sendPrivateMessage,
     setTyping,
+    markMessageRead,
+    myId,
+    sendReaction,
   };
 };
 
