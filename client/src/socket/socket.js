@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3001';
 
 // Create socket instance
-export const socket = io(SOCKET_URL, {
+export const socket = io(`${SOCKET_URL}/chat`, {
   autoConnect: false,
   reconnection: true,
   reconnectionAttempts: 5,
@@ -22,9 +22,12 @@ export const useSocket = () => {
   const [users, setUsers] = useState([]);
   const [typingUsers, setTypingUsers] = useState([]);
   const [myId, setMyId] = useState(null);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [lastJoin, setLastJoin] = useState({ username: '', room: '' });
 
   // Connect to socket server
   const connect = (username, room) => {
+    setLastJoin({ username, room });
     socket.connect();
     if (username && room) {
       socket.emit('user_join', { username, room });
@@ -36,14 +39,21 @@ export const useSocket = () => {
     socket.disconnect();
   };
 
-  // Send a message
-  const sendMessage = (message, room, options = {}) => {
-    socket.emit('send_message', { message, room, ...options });
+  // Update sendMessage and sendPrivateMessage:
+  const sendMessage = (message, room, options = {}, onAck) => {
+    const id = Date.now();
+    socket.emit('send_message', { message, room, ...options, id }, (ack) => {
+      if (onAck) onAck(ack);
+    });
+    return id;
   };
 
-  // Send a private message
-  const sendPrivateMessage = (to, message) => {
-    socket.emit('private_message', { to, message });
+  const sendPrivateMessage = (to, message, onAck) => {
+    const id = Date.now();
+    socket.emit('private_message', { to, message, id }, (ack) => {
+      if (onAck) onAck(ack);
+    });
+    return id;
   };
 
   // Set typing status
@@ -60,6 +70,20 @@ export const useSocket = () => {
   const sendReaction = (messageId, reaction) => {
     socket.emit('message_reaction', { messageId, reaction });
   };
+
+  const getMessages = (room, before, limit = 20) =>
+    new Promise((resolve) => {
+      socket.emit('get_messages', { room, before, limit }, (msgs) => {
+        resolve(msgs);
+      });
+    });
+
+  const searchMessages = (room, query, limit = 20) =>
+    new Promise((resolve) => {
+      socket.emit('search_messages', { room, query, limit }, (msgs) => {
+        resolve(msgs);
+      });
+    });
 
   // Socket event listeners
   useEffect(() => {
@@ -143,6 +167,16 @@ export const useSocket = () => {
       setTypingUsers(users);
     };
 
+    const onReconnectAttempt = () => setReconnecting(true);
+    const onReconnect = () => {
+      setReconnecting(false);
+      // Re-join room after reconnect
+      if (lastJoin.username && lastJoin.room) {
+        socket.emit('user_join', lastJoin);
+      }
+    };
+    const onReconnectError = () => setReconnecting(false);
+
     // Register event listeners
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
@@ -154,6 +188,9 @@ export const useSocket = () => {
     socket.on('typing_users', onTypingUsers);
     socket.on('message_read_update', onMessageReadUpdate);
     socket.on('message_reaction_update', onMessageReactionUpdate);
+    socket.on('reconnect_attempt', onReconnectAttempt);
+    socket.on('reconnect', onReconnect);
+    socket.on('reconnect_error', onReconnectError);
 
     // Clean up event listeners
     return () => {
@@ -167,8 +204,11 @@ export const useSocket = () => {
       socket.off('typing_users', onTypingUsers);
       socket.off('message_read_update', onMessageReadUpdate);
       socket.off('message_reaction_update', onMessageReactionUpdate);
+      socket.off('reconnect_attempt', onReconnectAttempt);
+      socket.off('reconnect', onReconnect);
+      socket.off('reconnect_error', onReconnectError);
     };
-  }, []);
+  }, [lastJoin]);
 
   return {
     socket,
@@ -185,6 +225,10 @@ export const useSocket = () => {
     markMessageRead,
     myId,
     sendReaction,
+    getMessages,
+    reconnecting,
+    lastJoin,
+    searchMessages,
   };
 };
 
