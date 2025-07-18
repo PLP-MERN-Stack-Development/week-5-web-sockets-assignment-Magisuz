@@ -4,12 +4,12 @@ const { Server } = require('socket.io');
 const mongoose = require('mongoose');
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: '*',
+    origin: process.env.CORS_ORIGIN || '*',
     methods: ['GET', 'POST']
   }
 });
@@ -21,7 +21,7 @@ const chatNamespace = io.of('/chat');
 const users = {};
 
 // Connect to MongoDB
-mongoose.connect('mongodb://localhost:27017/chatapp', {
+mongoose.connect(process.env.MONGO_URL || 'mongodb://localhost:27017/chatapp', {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 });
